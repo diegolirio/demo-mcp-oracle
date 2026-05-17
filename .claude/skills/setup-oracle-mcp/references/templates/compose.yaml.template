@@ -1,3 +1,6 @@
+# Template for Oracle — substitute with the appropriate image/env for other engines.
+#
+# Oracle (gvenzl/oracle-free):
 services:
   oracle:
     image: gvenzl/oracle-free:latest
@@ -19,3 +22,48 @@ services:
 
 volumes:
   oracle-data:
+
+# ── PostgreSQL (postgres:16) ──────────────────────────────────────────────────
+# services:
+#   postgres:
+#     image: postgres:16
+#     container_name: postgres-db
+#     environment:
+#       POSTGRES_USER: {db-user}
+#       POSTGRES_PASSWORD: {db-password}
+#       POSTGRES_DB: {db-name}
+#     ports:
+#       - "{db-port}:5432"
+#     volumes:
+#       - postgres-data:/var/lib/postgresql/data
+#     healthcheck:
+#       test: ["CMD-SHELL", "pg_isready -U {db-user}"]
+#       interval: 10s
+#       timeout: 5s
+#       retries: 5
+#
+# volumes:
+#   postgres-data:
+
+# ── MySQL (mysql:8) ───────────────────────────────────────────────────────────
+# services:
+#   mysql:
+#     image: mysql:8
+#     container_name: mysql-db
+#     environment:
+#       MYSQL_ROOT_PASSWORD: {root-password}
+#       MYSQL_USER: {db-user}
+#       MYSQL_PASSWORD: {db-password}
+#       MYSQL_DATABASE: {db-name}
+#     ports:
+#       - "{db-port}:3306"
+#     volumes:
+#       - mysql-data:/var/lib/mysql
+#     healthcheck:
+#       test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+#       interval: 10s
+#       timeout: 5s
+#       retries: 5
+#
+# volumes:
+#   mysql-data:

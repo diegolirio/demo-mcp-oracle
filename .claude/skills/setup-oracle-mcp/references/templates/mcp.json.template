@@ -1,15 +1,15 @@
 {
   "mcpServers": {
-    "oracle-db": {
+    "{server-name}": {
       "command": "uvx",
       "args": [
         "--from",
-        "oracledb-mcp-server",
-        "oracledb_mcp_server"
+        "{mcp-package}",
+        "{mcp-entrypoint}"
       ],
       "env": {
-        "DB_CONNECTION_STRING": "oracle+oracledb://{db-user}:{db-password}@{db-host}:{db-port}/?service_name={service-name}",
-        "COMMENT_DB_CONNECTION_STRING": "oracle+oracledb://{db-user}:{db-password}@{db-host}:{db-port}/?service_name={service-name}"
+        "DB_CONNECTION_STRING": "{connection-string}",
+        "COMMENT_DB_CONNECTION_STRING": "{connection-string}"
       }
     }
   }
