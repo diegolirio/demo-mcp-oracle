@@ -1,5 +1,5 @@
 ---
-name: sql-dbmigrations-oracle-mcp
+name: sql-extract-ddl-oracle-mcp
 description: >
   Connects to an Oracle database via MCP and exports all DDL objects (tables,
   sequences, constraints, indexes, views, triggers, procedures, functions,
@@ -15,7 +15,7 @@ argument-hint: >
   If omitted, the skill reads .mcp.json and asks interactively for missing values.
 ---
 
-# Skill: sql-dbmigrations-oracle-mcp
+# Skill: sql-extract-ddl-oracle-mcp
 
 Conecta ao Oracle via MCP e exporta **todos os objetos DDL** do schema em arquivos
 SQL prontos para serem aplicados pelo Flyway em outro banco, sem quebrar.

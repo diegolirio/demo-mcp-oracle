@@ -9,7 +9,7 @@ Projeto de demonstração do uso de skills do Claude Code para conectar, inspeci
 ```
 compose.yaml          → containers Oracle (oracle-db / oracle-db2)
 .mcp.json             → servidores MCP configurados para cada banco
-migrations-staging/   → DDLs exportados pelo skill sql-dbmigrations-oracle-mcp
+migrations-staging/   → DDLs exportados pelo skill sql-extract-ddl-oracle-mcp
 ```
 
 ---
@@ -108,7 +108,7 @@ Resultado em `.mcp.json`:
 
 ---
 
-## Skill 2 — `sql-dbmigrations-oracle-mcp`
+## Skill 2 — `sql-extract-ddl-oracle-mcp`
 
 Conecta ao Oracle via MCP e exporta **todos os objetos DDL** do schema como arquivos SQL compatíveis com Flyway, prontos para serem aplicados em outro banco sem erros de dependência.
 
@@ -117,13 +117,13 @@ Conecta ao Oracle via MCP e exporta **todos os objetos DDL** do schema como arqu
 No prompt do Claude Code, digite:
 
 ```
-/sql-dbmigrations-oracle-mcp
+/sql-extract-ddl-oracle-mcp
 ```
 
 Argumentos opcionais (podem ser passados diretamente):
 
 ```
-/sql-dbmigrations-oracle-mcp --version 0.0.1 --output migrations-staging/ --mcp oracle-db
+/sql-extract-ddl-oracle-mcp --version 0.0.1 --output migrations-staging/ --mcp oracle-db
 ```
 
 Se houver mais de um servidor `oracle-*` no `.mcp.json`, o skill pergunta qual usar.
@@ -208,7 +208,7 @@ docker compose up -d
 # 3. Reinicie o Claude Code para carregar o MCP server
 
 # 4. Exporte o schema como migrations Flyway
-/sql-dbmigrations-oracle-mcp
+/sql-extract-ddl-oracle-mcp
 
 # 5. Aplique em outro banco (ex.: com Flyway CLI)
 flyway -url=jdbc:oracle:thin:@//target-host:1521/FREEPDB1 \
