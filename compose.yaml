@@ -1,0 +1,40 @@
+services:
+  oracle:
+    image: gvenzl/oracle-free:latest
+    container_name: oracle-db
+    environment:
+      ORACLE_PASSWORD: secret
+      APP_USER: app
+      APP_USER_PASSWORD: app
+    ports:
+      - "1521:1521"
+    volumes:
+      - oracle-data:/opt/oracle/oradata
+    healthcheck:
+      test: ["CMD-SHELL", "healthcheck.sh"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+
+  oracle2:
+    image: gvenzl/oracle-free:latest
+    container_name: oracle-db2
+    environment:
+      ORACLE_PASSWORD: secret
+      APP_USER: app2
+      APP_USER_PASSWORD: app2
+    ports:
+      - "1522:1521"
+    volumes:
+      - oracle-data2:/opt/oracle/oradata
+    healthcheck:
+      test: ["CMD-SHELL", "healthcheck.sh"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+
+volumes:
+  oracle-data:
+  oracle-data2:

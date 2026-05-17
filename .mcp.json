@@ -1,0 +1,28 @@
+{
+  "mcpServers": {
+    "oracle-db": {
+      "command": "uvx",
+      "args": [
+        "--from",
+        "oracledb-mcp-server",
+        "oracledb_mcp_server"
+      ],
+      "env": {
+        "DB_CONNECTION_STRING": "oracle+oracledb://app:app@localhost:1521/?service_name=FREEPDB1",
+        "COMMENT_DB_CONNECTION_STRING": "oracle+oracledb://app:app@localhost:1521/?service_name=FREEPDB1"
+      }
+    },
+    "oracle-db2": {
+      "command": "uvx",
+      "args": [
+        "--from",
+        "oracledb-mcp-server",
+        "oracledb_mcp_server"
+      ],
+      "env": {
+        "DB_CONNECTION_STRING": "oracle+oracledb://app2:app2@localhost:1522/?service_name=FREEPDB1",
+        "COMMENT_DB_CONNECTION_STRING": "oracle+oracledb://app2:app2@localhost:1522/?service_name=FREEPDB1"
+      }
+    }
+  }
+}
