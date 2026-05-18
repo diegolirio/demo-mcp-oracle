@@ -46,6 +46,21 @@ Antes de perguntar qualquer coisa, ler em ordem de prioridade:
 | `version` | `0.0.1` |
 | `max-lines` | `1000` |
 
+### Se `.mcp.json` não existir ou não contiver nenhum servidor `oracle-*`
+
+**Parar imediatamente** e exibir a seguinte mensagem ao usuário:
+
+> **`.mcp.json` não encontrado ou sem servidor Oracle configurado.**
+>
+> Esta skill requer um servidor MCP Oracle configurado no projeto.
+> Execute primeiro a skill **`/setup-db-mcp`** para configurar a conexão.
+>
+> Referência e instruções: https://github.com/diegolirio/demo-mcp-oracle/tree/main/.claude/skills/setup-db-mcp
+>
+> Após configurar o MCP, reinicie o Claude Code e execute `/sql-extract-ddl-oracle-mcp` novamente.
+
+Não prosseguir para o Passo 1 até que `.mcp.json` exista com ao menos um servidor `oracle-*`.
+
 Se houver **mais de um servidor oracle-*** no `.mcp.json`, perguntar qual usar via `AskUserQuestion`.
 
 ---
