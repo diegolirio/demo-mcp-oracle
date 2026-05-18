@@ -100,6 +100,65 @@ Exibir resumo do inventário (contagem por tipo) antes de prosseguir.
 
 ---
 
+## Passo 2.1 — Coletar Tablespaces
+
+Antes de gerar os DDLs, executar as queries abaixo para capturar os tablespaces de
+dados (tabelas) e de índices. Armazenar o resultado em memória para uso no Passo 3.
+
+> **Nota:** Usar `all_tables` / `all_indexes` em vez de `user_tables` / `user_indexes`
+> quando o schema-alvo for diferente do usuário conectado.
+
+### Tablespace das tabelas
+
+```sql
+SELECT table_name, tablespace_name
+FROM   user_tables
+WHERE  tablespace_name IS NOT NULL
+ORDER BY table_name
+```
+
+Se o usuário conectado **não é o dono do schema** (ex.: usuário de leitura), usar:
+
+```sql
+SELECT table_name, tablespace_name
+FROM   all_tables
+WHERE  owner = '<SCHEMA_NAME>'
+  AND  tablespace_name IS NOT NULL
+ORDER BY table_name
+```
+
+### Tablespace dos índices (incluindo PK/UK)
+
+```sql
+SELECT index_name, table_name, tablespace_name
+FROM   user_indexes
+WHERE  tablespace_name IS NOT NULL
+  AND  index_name NOT LIKE 'SYS_%'
+  AND  index_name NOT LIKE 'BIN$%'
+ORDER BY index_name
+```
+
+Se o usuário conectado **não é o dono do schema**:
+
+```sql
+SELECT index_name, table_name, tablespace_name
+FROM   all_indexes
+WHERE  owner = '<SCHEMA_NAME>'
+  AND  tablespace_name IS NOT NULL
+  AND  index_name NOT LIKE 'SYS_%'
+  AND  index_name NOT LIKE 'BIN$%'
+ORDER BY index_name
+```
+
+### Como usar os tablespaces coletados
+
+- Para cada `CREATE TABLE`, adicionar ao final: `TABLESPACE <tablespace_name>`
+- Para cada `CONSTRAINT ... PRIMARY KEY` ou `CONSTRAINT ... UNIQUE` inline na tabela,
+  adicionar: `USING INDEX TABLESPACE <index_tablespace_name>`
+- Para cada `CREATE INDEX`, adicionar ao final: `TABLESPACE <index_tablespace_name>`
+
+---
+
 ## Passo 3 — Extrair DDLs em ordem de dependência
 
 **A ordem de emissão é crítica.** Seguir exatamente a sequência abaixo para garantir
@@ -143,17 +202,9 @@ WHERE  object_type = 'SEQUENCE'
 ORDER BY object_name
 ```
 
-#### TABLES (sem foreign keys — suprimir via transformação)
-```sql
--- Para cada tabela, executar individualmente:
-SELECT DBMS_METADATA.GET_DDL('TABLE', '<TABLE_NAME>') AS ddl
-FROM   DUAL
-```
+#### TABLES (sem foreign keys — com tablespace)
 
-> **Nota:** O DDL retornado pelo DBMS_METADATA inclui PK, UNIQUE e CHECK constraints
-> inline. Isso é correto e deve ser mantido. **Foreign keys serão emitidas separadamente.**
-
-Para suprimir FK do DDL da tabela, executar antes de extrair cada tabela:
+Antes de extrair cada tabela, **suprimir FK** via transformação:
 
 ```sql
 BEGIN
@@ -163,7 +214,13 @@ BEGIN
 END;
 ```
 
-E restaurar depois:
+```sql
+-- Para cada tabela, executar individualmente:
+SELECT DBMS_METADATA.GET_DDL('TABLE', '<TABLE_NAME>') AS ddl
+FROM   DUAL
+```
+
+Restaurar depois:
 ```sql
 BEGIN
   DBMS_METADATA.SET_TRANSFORM_PARAM(
@@ -171,6 +228,22 @@ BEGIN
   );
 END;
 ```
+
+> **Nota:** O DDL retornado pelo DBMS_METADATA inclui PK, UNIQUE e CHECK constraints
+> inline. Isso é correto e deve ser mantido. **Foreign keys serão emitidas separadamente.**
+
+**Quando o DDL é construído manualmente** (sem DBMS_METADATA), gerar no formato:
+
+```sql
+CREATE TABLE <TABLE_NAME> (
+  <colunas>,
+  CONSTRAINT <PK_NAME> PRIMARY KEY (<col>)
+    USING INDEX TABLESPACE <index_tablespace>
+) TABLESPACE <table_tablespace>;
+```
+
+Usar os valores coletados no **Passo 2.1** para preencher `<table_tablespace>` e
+`<index_tablespace>`.
 
 #### FOREIGN KEYS (após todas as tabelas)
 ```sql
@@ -183,8 +256,9 @@ ORDER BY c.table_name, c.constraint_name
 ```
 
 #### INDEXES (apenas os não auto-gerados por PK/UK/sistema)
+
 ```sql
-SELECT i.index_name,
+SELECT i.index_name, i.tablespace_name,
        DBMS_METADATA.GET_DDL('INDEX', i.index_name) AS ddl
 FROM   user_indexes i
 WHERE  i.index_type != 'LOB'
@@ -196,6 +270,13 @@ WHERE  i.index_type != 'LOB'
   AND  i.index_name NOT LIKE 'SYS_%'
   AND  i.index_name NOT LIKE 'BIN$%'
 ORDER BY i.index_name
+```
+
+**Quando construído manualmente**, usar tablespace coletado no Passo 2.1:
+
+```sql
+CREATE INDEX <INDEX_NAME> ON <TABLE_NAME> (<col>)
+  TABLESPACE <index_tablespace>;
 ```
 
 #### VIEWS
@@ -294,7 +375,11 @@ Para cada DDL retornado pelo DBMS_METADATA aplicar as seguintes normalizações:
 
 1. **Remover schema qualifier** — substituir `"APP".` (ou o nome do schema atual) por string vazia, para tornar o script portável entre schemas.
 2. **Garantir terminador** — cada statement deve terminar com `;`. Para PL/SQL (TRIGGER, PROCEDURE, FUNCTION, PACKAGE, TYPE com corpo), usar `\n/\n` como terminador (Oracle SQL*Plus style).
-3. **Remover parâmetros de storage desnecessários** para portabilidade quando não forem semanticamente relevantes (`SEGMENT CREATION DEFERRED`, `PCTFREE`, `PCTUSED`, `INITRANS`, `MAXTRANS`, `NOCOMPRESS`, `LOGGING`, `TABLESPACE "USERS"` são opcionais — **manter ou remover conforme preferência do usuário**; o default é manter para fidelidade).
+3. **Tablespace — sempre incluir** — A cláusula `TABLESPACE` de tabelas e índices
+   **deve sempre ser emitida**. Usar os valores coletados no Passo 2.1. Nunca omitir.
+   Outros parâmetros de storage (`SEGMENT CREATION DEFERRED`, `PCTFREE`, `PCTUSED`,
+   `INITRANS`, `MAXTRANS`, `NOCOMPRESS`, `LOGGING`) são opcionais — manter ou remover
+   conforme preferência do usuário; o default é remover para maior portabilidade.
 4. **Cabeçalho por objeto:**
 ```sql
 -- ------------------------------------------------------------
@@ -382,6 +467,7 @@ Indicar se algum objeto foi ignorado (status `INVALID`, `BIN$...`, `SYS_...`) e 
 
 | Regra | Detalhe |
 |---|---|
+| Tablespace sempre explícito | Incluir `TABLESPACE` em TABLE e `USING INDEX TABLESPACE` em PK/UK; usar valores do Passo 2.1 |
 | Sem schema hardcoded | Remover `"APP".` ou `"SCHEMA".` prefix de todos os DDLs |
 | FK separada de TABLE | Evita `ORA-02298` por tabela referenciada ainda não existente |
 | PACKAGE spec antes de body | `ORA-04067` se body compilar sem spec |
