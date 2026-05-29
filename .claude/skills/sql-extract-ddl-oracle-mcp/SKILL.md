@@ -1,87 +1,72 @@
 ---
 name: sql-extract-ddl-oracle-mcp
-description: >
-  Connects to an Oracle database via MCP and exports all DDL objects (tables,
-  sequences, constraints, indexes, views, triggers, procedures, functions,
-  packages, types, synonyms) as Flyway-compatible SQL migration files under
-  migrations-staging/. Objects are emitted in dependency-safe order so the
-  scripts can be applied to a clean schema without errors. Files are split at
-  1000 lines and named following the Flyway pattern V{x}.{y}.{z}__{slug}.sql.
-  Use when the user asks to export DDLs, reverse-engineer a schema, generate
-  migrations from an existing Oracle DB, or mentions "reverse migration",
-  "exportar DDL", "gerar migrations", or "migrations-staging".
-argument-hint: >
-  Optional: --version 0.0.1 --output migrations-staging/ --mcp oracle-db
-  If omitted, the skill reads .mcp.json and asks interactively for missing values.
+description: "Connects to an Oracle database via MCP and exports all DDL objects (tables, sequences, constraints, indexes, views, triggers, procedures, functions, packages, types, synonyms) as Flyway-compatible SQL migration files under migrations-staging/. Objects are emitted in dependency-safe order so the scripts can be applied to a clean schema without errors. Files are split at 1000 lines and named following the Flyway pattern V{x}.{y}.{z}__{slug}.sql. Use when the user asks to export DDLs, reverse-engineer a schema, generate migrations from an existing Oracle DB, or mentions \"reverse migration\", \"exportar DDL\", \"gerar migrations\", or \"migrations-staging\"."
+argument-hint: "Optional: --version <major.minor.patch> --output <dir> --mcp <server-name>"
 ---
 
 # Skill: sql-extract-ddl-oracle-mcp
 
-Conecta ao Oracle via MCP e exporta **todos os objetos DDL** do schema em arquivos
-SQL prontos para serem aplicados pelo Flyway em outro banco, sem quebrar.
+Extracts the complete DDL of an Oracle schema via MCP and writes Flyway-compatible
+`.sql` migration files to `./migrations-staging/`.
+
+**Output is exclusively `.sql` files. No shell scripts, no Python scripts, no helper
+files of any kind are produced. The only deliverable is the SQL migrations.**
+
+Works in any environment — terminal, Claude Code CLI, VS Code, IntelliJ — because
+all work is done through MCP queries and the Write tool, with no dependency on the
+local shell beyond `mkdir`.
 
 ---
 
-## Quando usar
+## Step 0 — Auto-detect parameters
 
-- Usuário quer exportar/reverter o schema Oracle como migrations.
-- Precisa levar estrutura de um ambiente para outro (dev → staging, staging → prod).
-- Quer versionar o schema existente no Flyway pela primeira vez.
-- Menciona "exportar DDL", "gerar migrations", "reverse engineering", "migrations-staging".
+Read in priority order:
 
----
-
-## Passo 0 — Auto-detecção de parâmetros
-
-Antes de perguntar qualquer coisa, ler em ordem de prioridade:
-
-1. **Argumentos** passados pelo usuário (`--version`, `--output`, `--mcp`).
-2. **`.mcp.json`** — extrair todos os servidores `oracle-*` com suas connection strings.
+1. **Arguments** passed by the user (`--version`, `--output`, `--mcp`).
+2. **`.mcp.json`** in the current directory — extract every `oracle-*` server.
 3. **Defaults**:
 
-| Parâmetro | Default |
+| Parameter | Default |
 |---|---|
-| `mcp-server` | `oracle-db` (primeiro oracle-* encontrado no .mcp.json) |
-| `output-dir` | `migrations-staging/` |
+| `mcp-server` | First `oracle-*` entry found in `.mcp.json` |
+| `output-dir` | `./migrations-staging/` |
 | `version` | `0.0.1` |
 | `max-lines` | `1000` |
 
-### Se `.mcp.json` não existir ou não contiver nenhum servidor `oracle-*`
+### If `.mcp.json` is missing or has no `oracle-*` server
 
-**Parar imediatamente** e exibir a seguinte mensagem ao usuário:
+**Stop immediately** and show:
 
-> **`.mcp.json` não encontrado ou sem servidor Oracle configurado.**
+> **No Oracle MCP server found.**
 >
-> Esta skill requer um servidor MCP Oracle configurado no projeto.
-> Execute primeiro a skill **`/setup-db-mcp`** para configurar a conexão.
->
-> Referência e instruções: https://github.com/diegolirio/demo-mcp-oracle/tree/main/.claude/skills/setup-db-mcp
->
-> Após configurar o MCP, reinicie o Claude Code e execute `/sql-extract-ddl-oracle-mcp` novamente.
+> This skill requires an Oracle MCP server configured in `.mcp.json`.
+> Run `/setup-db-mcp` first to set up the connection, then restart Claude Code
+> and run `/sql-extract-ddl-oracle-mcp` again.
 
-Não prosseguir para o Passo 1 até que `.mcp.json` exista com ao menos um servidor `oracle-*`.
+Do not proceed to Step 1 until at least one `oracle-*` server exists in `.mcp.json`.
 
-Se houver **mais de um servidor oracle-*** no `.mcp.json`, perguntar qual usar via `AskUserQuestion`.
+If **more than one** `oracle-*` server is found, ask the user which one to use via
+`AskUserQuestion`. Otherwise, proceed silently.
 
 ---
 
-## Passo 1 — Confirmar conexão
+## Step 1 — Verify connectivity
 
-Usar o MCP tool do servidor detectado para validar conectividade:
+Run through the MCP server:
 
 ```sql
-SELECT USER AS schema_name, SYS_CONTEXT('USERENV','DB_NAME') AS db_name FROM DUAL
+SELECT USER AS schema_name,
+       SYS_CONTEXT('USERENV','DB_NAME') AS db_name
+FROM   DUAL
 ```
 
-Exibir: `Conectado como <USER> no banco <DB_NAME>`.
+Report: `Connected as <USER> on <DB_NAME>.`
 
-Se falhar: orientar o usuário a verificar `.mcp.json` e reiniciar o Claude Code.
+On failure: tell the user to check `.mcp.json` and restart Claude Code.
 
 ---
 
-## Passo 2 — Inventariar objetos do schema
-
-Executar a query de inventário para listar todos os objetos relevantes:
+## Step 2 — Inventory objects
 
 ```sql
 SELECT object_type, object_name, status
@@ -96,20 +81,15 @@ WHERE  object_type IN (
 ORDER BY object_type, object_name
 ```
 
-Exibir resumo do inventário (contagem por tipo) antes de prosseguir.
+Show a count-by-type summary before continuing.
 
 ---
 
-## Passo 2.1 — Coletar Tablespaces
+## Step 2.1 — Collect tablespace assignments
 
-Antes de gerar os DDLs, executar as queries abaixo para capturar os tablespaces de
-dados (tabelas) e de índices. Armazenar o resultado em memória para uso no Passo 3.
+Store in memory — used in Steps 3 and 4.
 
-> **Nota:** Usar `all_tables` / `all_indexes` em vez de `user_tables` / `user_indexes`
-> quando o schema-alvo for diferente do usuário conectado.
-
-### Tablespace das tabelas
-
+**Table tablespaces:**
 ```sql
 SELECT table_name, tablespace_name
 FROM   user_tables
@@ -117,18 +97,7 @@ WHERE  tablespace_name IS NOT NULL
 ORDER BY table_name
 ```
 
-Se o usuário conectado **não é o dono do schema** (ex.: usuário de leitura), usar:
-
-```sql
-SELECT table_name, tablespace_name
-FROM   all_tables
-WHERE  owner = '<SCHEMA_NAME>'
-  AND  tablespace_name IS NOT NULL
-ORDER BY table_name
-```
-
-### Tablespace dos índices (incluindo PK/UK)
-
+**Index tablespaces:**
 ```sql
 SELECT index_name, table_name, tablespace_name
 FROM   user_indexes
@@ -138,55 +107,36 @@ WHERE  tablespace_name IS NOT NULL
 ORDER BY index_name
 ```
 
-Se o usuário conectado **não é o dono do schema**:
-
-```sql
-SELECT index_name, table_name, tablespace_name
-FROM   all_indexes
-WHERE  owner = '<SCHEMA_NAME>'
-  AND  tablespace_name IS NOT NULL
-  AND  index_name NOT LIKE 'SYS_%'
-  AND  index_name NOT LIKE 'BIN$%'
-ORDER BY index_name
-```
-
-### Como usar os tablespaces coletados
-
-- Para cada `CREATE TABLE`, adicionar ao final: `TABLESPACE <tablespace_name>`
-- Para cada `CONSTRAINT ... PRIMARY KEY` ou `CONSTRAINT ... UNIQUE` inline na tabela,
-  adicionar: `USING INDEX TABLESPACE <index_tablespace_name>`
-- Para cada `CREATE INDEX`, adicionar ao final: `TABLESPACE <index_tablespace_name>`
+If the connected user is not the schema owner, use `all_tables` / `all_indexes`
+filtered by `owner = '<SCHEMA_NAME>'`.
 
 ---
 
-## Passo 3 — Extrair DDLs em ordem de dependência
+## Step 3 — Extract DDLs in dependency-safe order
 
-**A ordem de emissão é crítica.** Seguir exatamente a sequência abaixo para garantir
-que o script possa ser aplicado em um banco limpo sem erros de referência:
+**This order is mandatory. Do not deviate.**
 
-### Ordem de exportação
-
-| # | Tipo Oracle | Motivo |
+| # | Object type | Reason |
 |---|---|---|
-| 1 | `TYPE` | Tipos customizados usados em colunas e parâmetros |
-| 2 | `SEQUENCE` | Referenciadas como DEFAULT em colunas |
-| 3 | `TABLE` (sem FK) | Estrutura base; FK separada para evitar dependência circular |
-| 4 | `UNIQUE` e `PRIMARY KEY` constraints | Já embutidos no CREATE TABLE — não reemitir |
-| 5 | `FOREIGN KEY` constraints | Após todas as tabelas existirem |
-| 6 | `INDEX` (apenas os não-sistema) | Após tabelas e constraints |
-| 7 | `VIEW` | Dependem de tabelas |
-| 8 | `MATERIALIZED VIEW` | Dependem de tabelas/views |
-| 9 | `SYNONYM` | Referências a objetos existentes |
-| 10 | `TRIGGER` | Dependem de tabelas |
-| 11 | `PROCEDURE` / `FUNCTION` | Corpo PL/SQL |
-| 12 | `PACKAGE` (spec primeiro, depois body) | Spec antes de body |
-| 13 | `COMMENT` | Após todos os objetos existirem |
+| 1 | `TYPE` | Used in column definitions and PL/SQL signatures |
+| 2 | `SEQUENCE` | Referenced as DEFAULT in columns |
+| 3 | `TABLE` (no FK) | Base structure; FK emitted separately to avoid circular deps |
+| 4 | `FOREIGN KEY` | After all tables exist |
+| 5 | `INDEX` (non-system) | After tables and constraints |
+| 6 | `VIEW` | Depends on tables |
+| 7 | `MATERIALIZED VIEW` | Depends on tables/views |
+| 8 | `SYNONYM` | References existing objects |
+| 9 | `TRIGGER` | Depends on tables |
+| 10 | `PROCEDURE` / `FUNCTION` | PL/SQL bodies |
+| 11 | `PACKAGE` spec, then `PACKAGE BODY` | Spec must precede body |
+| 12 | `COMMENT` | After all objects exist |
 
-### Queries por tipo
+### Extraction queries
 
 #### TYPES
 ```sql
-SELECT DBMS_METADATA.GET_DDL('TYPE', object_name) AS ddl
+SELECT object_name,
+       DBMS_METADATA.GET_DDL('TYPE', object_name) AS ddl
 FROM   user_objects
 WHERE  object_type = 'TYPE'
   AND  object_name NOT LIKE 'SYS_%'
@@ -202,9 +152,7 @@ WHERE  object_type = 'SEQUENCE'
 ORDER BY object_name
 ```
 
-#### TABLES (sem foreign keys — com tablespace)
-
-Antes de extrair cada tabela, **suprimir FK** via transformação:
+#### TABLES — suppress FK, then restore
 
 ```sql
 BEGIN
@@ -214,13 +162,12 @@ BEGIN
 END;
 ```
 
+For each table individually:
 ```sql
--- Para cada tabela, executar individualmente:
-SELECT DBMS_METADATA.GET_DDL('TABLE', '<TABLE_NAME>') AS ddl
-FROM   DUAL
+SELECT DBMS_METADATA.GET_DDL('TABLE', '<TABLE_NAME>') AS ddl FROM DUAL
 ```
 
-Restaurar depois:
+Restore FK emission after all tables are extracted:
 ```sql
 BEGIN
   DBMS_METADATA.SET_TRANSFORM_PARAM(
@@ -229,23 +176,9 @@ BEGIN
 END;
 ```
 
-> **Nota:** O DDL retornado pelo DBMS_METADATA inclui PK, UNIQUE e CHECK constraints
-> inline. Isso é correto e deve ser mantido. **Foreign keys serão emitidas separadamente.**
+PK/UK constraints are inline in `CREATE TABLE` — do not re-emit them separately.
 
-**Quando o DDL é construído manualmente** (sem DBMS_METADATA), gerar no formato:
-
-```sql
-CREATE TABLE <TABLE_NAME> (
-  <colunas>,
-  CONSTRAINT <PK_NAME> PRIMARY KEY (<col>)
-    USING INDEX TABLESPACE <index_tablespace>
-) TABLESPACE <table_tablespace>;
-```
-
-Usar os valores coletados no **Passo 2.1** para preencher `<table_tablespace>` e
-`<index_tablespace>`.
-
-#### FOREIGN KEYS (após todas as tabelas)
+#### FOREIGN KEYS
 ```sql
 SELECT c.table_name,
        c.constraint_name,
@@ -255,8 +188,7 @@ WHERE  c.constraint_type = 'R'
 ORDER BY c.table_name, c.constraint_name
 ```
 
-#### INDEXES (apenas os não auto-gerados por PK/UK/sistema)
-
+#### INDEXES (non-system, non-PK/UK)
 ```sql
 SELECT i.index_name, i.tablespace_name,
        DBMS_METADATA.GET_DDL('INDEX', i.index_name) AS ddl
@@ -270,13 +202,6 @@ WHERE  i.index_type != 'LOB'
   AND  i.index_name NOT LIKE 'SYS_%'
   AND  i.index_name NOT LIKE 'BIN$%'
 ORDER BY i.index_name
-```
-
-**Quando construído manualmente**, usar tablespace coletado no Passo 2.1:
-
-```sql
-CREATE INDEX <INDEX_NAME> ON <TABLE_NAME> (<col>)
-  TABLESPACE <index_tablespace>;
 ```
 
 #### VIEWS
@@ -333,9 +258,8 @@ WHERE  object_type = 'FUNCTION'
 ORDER BY object_name
 ```
 
-#### PACKAGES (spec antes do body)
+#### PACKAGES — spec before body
 ```sql
--- Specs
 SELECT object_name,
        DBMS_METADATA.GET_DDL('PACKAGE', object_name) AS ddl
 FROM   user_objects
@@ -343,7 +267,6 @@ WHERE  object_type = 'PACKAGE'
 ORDER BY object_name
 ```
 ```sql
--- Bodies
 SELECT object_name,
        DBMS_METADATA.GET_DDL('PACKAGE_BODY', object_name) AS ddl
 FROM   user_objects
@@ -369,120 +292,117 @@ ORDER BY table_name, column_name
 
 ---
 
-## Passo 4 — Limpar e formatar os DDLs
+## Step 4 — Normalize DDL text
 
-Para cada DDL retornado pelo DBMS_METADATA aplicar as seguintes normalizações:
+Apply to every DDL string returned by DBMS_METADATA before writing to disk:
 
-1. **Remover schema qualifier** — substituir `"APP".` (ou o nome do schema atual) por string vazia, para tornar o script portável entre schemas.
-2. **Garantir terminador** — cada statement deve terminar com `;`. Para PL/SQL (TRIGGER, PROCEDURE, FUNCTION, PACKAGE, TYPE com corpo), usar `\n/\n` como terminador (Oracle SQL*Plus style).
-3. **Tablespace — sempre incluir** — A cláusula `TABLESPACE` de tabelas e índices
-   **deve sempre ser emitida**. Usar os valores coletados no Passo 2.1. Nunca omitir.
-   Outros parâmetros de storage (`SEGMENT CREATION DEFERRED`, `PCTFREE`, `PCTUSED`,
-   `INITRANS`, `MAXTRANS`, `NOCOMPRESS`, `LOGGING`) são opcionais — manter ou remover
-   conforme preferência do usuário; o default é remover para maior portabilidade.
-4. **Cabeçalho por objeto:**
+1. **Strip schema qualifier** — remove `"<SCHEMA_NAME>".` prefix everywhere to make
+   scripts portable across schemas.
+2. **Enforce terminator** — end each DML/DDL statement with `;`. End every PL/SQL
+   block (TYPE body, TRIGGER, PROCEDURE, FUNCTION, PACKAGE, PACKAGE BODY) with `\n/\n`.
+3. **Always include TABLESPACE** — append `TABLESPACE <name>` to every `CREATE TABLE`
+   and `CREATE INDEX`. Add `USING INDEX TABLESPACE <name>` to inline PK/UK constraints.
+   Use the values collected in Step 2.1. **Never omit tablespace clauses.**
+4. **Strip storage noise** — remove `SEGMENT CREATION DEFERRED`, `PCTFREE`, `PCTUSED`,
+   `INITRANS`, `MAXTRANS`, `NOCOMPRESS`, `LOGGING`, `NOPARALLEL` for portability.
+5. **Per-object header:**
 ```sql
 -- ------------------------------------------------------------
 -- <OBJECT_TYPE>: <OBJECT_NAME>
 -- ------------------------------------------------------------
 ```
+6. **INVALID objects** — include in output but prepend:
+   `-- WARNING: object was INVALID at export time`
 
 ---
 
-## Passo 5 — Montar e dividir os arquivos
+## Step 5 — Assemble and split files
 
-### Estrutura do arquivo
-
+### File header (top of every file)
 ```sql
 -- ============================================================
--- Schema: <USER>
+-- Schema  : <USER>
 -- Database: <DB_NAME>
 -- Exported: <YYYY-MM-DD>
--- Objects: <lista resumida de tipos>
+-- File    : <filename>
 -- ============================================================
-
-<DDLs em ordem>
 ```
 
-### Regra de divisão (max-lines = 1000)
+### Split rule
 
-- Acumular DDLs na ordem definida no Passo 3.
-- Quando a contagem de linhas do arquivo atual atingir **1000**, fechar o arquivo e
-  iniciar o próximo.
-- **Nunca dividir no meio de um statement** — completar o objeto atual antes de abrir
-  novo arquivo.
-- O patch number (terceiro dígito da versão) incrementa a cada arquivo:
-  `V0.0.1`, `V0.0.2`, `V0.0.3`, ...
+- Accumulate DDLs in the order from Step 3.
+- When line count reaches **1000**, close the current file and open the next.
+- **Never split a statement in the middle** — always complete the current object before
+  opening a new file.
+- The patch number increments per file: `V0.0.1`, `V0.0.2`, `V0.0.3`, ...
 
-### Naming convention (Flyway)
+### File naming (Flyway convention)
 
 ```
-V{major}.{minor}.{patch}__{slug}.sql
+migrations-staging/V{major}.{minor}.{patch}__{slug}.sql
 ```
 
-Regras para o slug:
-- Usar o tipo do primeiro objeto do arquivo em snake_case (ex: `sequences`, `tables`, `foreign_keys`).
-- Se o arquivo contiver tipos mistos, usar `mixed_objects`.
-- Sempre em inglês, lowercase, underscores.
-
-Exemplos:
-```
-V0.0.1__types.sql
-V0.0.2__sequences.sql
-V0.0.3__tables.sql
-V0.0.4__foreign_keys.sql
-V0.0.5__indexes.sql
-V0.0.6__views.sql
-V0.0.7__triggers.sql
-V0.0.8__packages.sql
-```
+Slug rules:
+- Use the dominant object type of the file in lowercase snake_case:
+  `types`, `sequences`, `tables`, `foreign_keys`, `indexes`, `views`,
+  `materialized_views`, `synonyms`, `triggers`, `procedures`, `functions`,
+  `packages`, `comments`.
+- If a file contains mixed types, use `mixed_objects`.
+- Always English, lowercase, underscores only.
 
 ---
 
-## Passo 6 — Criar o diretório e escrever os arquivos
+## Step 6 — Write the SQL files
 
+Create the output directory:
 ```bash
-mkdir -p migrations-staging/
+mkdir -p migrations-staging
 ```
 
-Escrever cada arquivo com o Write tool. Confirmar ao usuário o nome de cada arquivo criado.
+Write **every file using the Write tool** — one call per `.sql` file.
+
+**Absolute rule: no other file types are ever created. No shell scripts, no Python
+scripts, no Makefiles, no README files, no intermediate artifacts of any kind.
+The only output of this skill is `.sql` files inside `./migrations-staging/`.**
+
+Confirm each file name to the user as it is written.
 
 ---
 
-## Passo 7 — Sumário final
+## Step 7 — Final summary
 
-Exibir tabela com:
+| File | Object types | Object count | Lines |
+|---|---|---|---|
+| V0.0.1__types.sql | TYPE | 2 | 45 |
+| V0.0.2__sequences.sql | SEQUENCE | 5 | 30 |
+| V0.0.3__tables.sql | TABLE | 12 | 320 |
+| ... | ... | ... | ... |
 
-| Arquivo | Objetos incluídos | Linhas |
-|---|---|---|
-| V0.0.1__sequences.sql | CUSTOMERS_SEQ | 12 |
-| V0.0.2__tables.sql | CUSTOMERS | 38 |
-| ... | ... | ... |
-
-Indicar se algum objeto foi ignorado (status `INVALID`, `BIN$...`, `SYS_...`) e por quê.
+List any skipped objects (INVALID, `BIN$...`, `SYS_...`) with the reason.
 
 ---
 
-## Regras de portabilidade (não quebrar em outro banco)
+## Portability rules (never break on a clean schema)
 
-| Regra | Detalhe |
+| Rule | Detail |
 |---|---|
-| Tablespace sempre explícito | Incluir `TABLESPACE` em TABLE e `USING INDEX TABLESPACE` em PK/UK; usar valores do Passo 2.1 |
-| Sem schema hardcoded | Remover `"APP".` ou `"SCHEMA".` prefix de todos os DDLs |
-| FK separada de TABLE | Evita `ORA-02298` por tabela referenciada ainda não existente |
-| PACKAGE spec antes de body | `ORA-04067` se body compilar sem spec |
-| TYPE antes de TABLE | `ORA-00902` em colunas com tipo customizado |
-| SEQUENCE antes de TABLE | `ORA-02289` no DEFAULT de coluna |
-| Terminador PL/SQL com `/` | SQL*Plus / SQLcl exigem `/` após bloco PL/SQL |
-| Sem `SEGMENT CREATION IMMEDIATE` hardcoded | Pode falhar em tablespaces sem quota |
-| Objetos INVALID no source | Avisar o usuário; exportar mesmo assim (pode haver dependências externas) |
+| Tablespace always explicit | `TABLESPACE` on TABLE; `USING INDEX TABLESPACE` on PK/UK inline constraints |
+| No hardcoded schema prefix | Strip `"SCHEMA".` from all DDL text |
+| FK after all tables | Prevents `ORA-02298` |
+| PACKAGE spec before body | Prevents `ORA-04067` |
+| TYPE before TABLE | Prevents `ORA-00902` on custom-type columns |
+| SEQUENCE before TABLE | Prevents `ORA-02289` on column DEFAULT |
+| PL/SQL terminated with `/` | Required by SQL*Plus and SQLcl |
+| No `SEGMENT CREATION IMMEDIATE` | Fails on tablespaces without quota |
+| INVALID objects flagged | Included with warning comment; never silently dropped |
 
 ---
 
 ## Troubleshooting
 
-- **`ORA-31603` no DBMS_METADATA** — objeto não existe ou nome errado; pular e logar.
-- **`ORA-04043` object does not exist** — verificar se o nome é case-sensitive no Oracle (sempre usar aspas duplas ao referenciar).
-- **MCP tool não disponível** — reiniciar Claude Code após editar `.mcp.json`.
-- **DDL retorna CLOB truncado** — o MCP server pode ter limite de tamanho; quebrar em queries menores por objeto individual.
-- **Objeto com status INVALID** — incluir no arquivo mas adicionar comentário `-- WARNING: object was INVALID at export time`.
+- **`ORA-31603`** — object does not exist or name is wrong; skip and log.
+- **`ORA-04043`** — name may be case-sensitive; always quote identifiers.
+- **MCP tool not available** — restart Claude Code after editing `.mcp.json`.
+- **CLOB truncated** — query objects individually instead of in bulk.
+- **`ORA-01031` insufficient privileges** — grant `SELECT_CATALOG_ROLE` to the
+  connected user or connect as the schema owner.

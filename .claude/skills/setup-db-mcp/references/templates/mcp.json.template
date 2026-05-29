@@ -8,8 +8,7 @@
         "{mcp-entrypoint}"
       ],
       "env": {
-        "DB_CONNECTION_STRING": "{connection-string}",
-        "COMMENT_DB_CONNECTION_STRING": "{connection-string}"
+        "DB_CONNECTION_STRING": "${ENV_VAR_NAME}"
       }
     }
   }
