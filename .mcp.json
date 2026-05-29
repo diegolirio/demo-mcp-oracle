@@ -23,6 +23,17 @@
         "DB_CONNECTION_STRING": "oracle+oracledb://app2:app2@localhost:1522/?service_name=FREEPDB1",
         "COMMENT_DB_CONNECTION_STRING": "oracle+oracledb://app2:app2@localhost:1522/?service_name=FREEPDB1"
       }
+    },
+    "bjj_postgres_local": {
+      "command": "uvx",
+      "args": [
+        "--from",
+        "mcp-server-postgres",
+        "mcp_server_postgres"
+      ],
+      "env": {
+        "DB_CONNECTION_STRING": "${BJJ_POSTGRES_LOCAL_CONNECTION_STRING}"
+      }
     }
   }
 }
